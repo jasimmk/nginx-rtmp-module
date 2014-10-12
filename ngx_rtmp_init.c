@@ -7,6 +7,7 @@
 #include <ngx_config.h>
 #include <ngx_core.h>
 #include "ngx_rtmp.h"
+#include "ngx_rtmp_proxy_protocol.h"
 
 
 static void ngx_rtmp_close_connection(ngx_connection_t *c);
@@ -130,7 +131,12 @@ ngx_rtmp_init_connection(ngx_connection_t *c)
 
     s->auto_pushed = unix_socket;
 
-    ngx_rtmp_handshake(s);
+    if (addr_conf->proxy_protocol) {
+        ngx_rtmp_proxy_protocol(s);
+
+    } else {
+        ngx_rtmp_handshake(s);
+    }
 }
 
 
@@ -141,7 +147,7 @@ ngx_rtmp_init_session(ngx_connection_t *c, ngx_rtmp_addr_conf_t *addr_conf)
     ngx_rtmp_core_srv_conf_t       *cscf;
     ngx_rtmp_error_log_ctx_t       *ctx;
 
-    s = ngx_pcalloc(c->pool, sizeof(ngx_rtmp_session_t) + 
+    s = ngx_pcalloc(c->pool, sizeof(ngx_rtmp_session_t) +
             sizeof(ngx_chain_t *) * ((ngx_rtmp_core_srv_conf_t *)
                 addr_conf->ctx-> srv_conf[ngx_rtmp_core_module
                     .ctx_index])->out_queue);
@@ -184,15 +190,20 @@ ngx_rtmp_init_session(ngx_connection_t *c, ngx_rtmp_addr_conf_t *addr_conf)
 
     s->out_queue = cscf->out_queue;
     s->out_cork = cscf->out_cork;
-    s->in_streams = ngx_pcalloc(c->pool, sizeof(ngx_rtmp_stream_t) 
+    s->in_streams = ngx_pcalloc(c->pool, sizeof(ngx_rtmp_stream_t)
             * cscf->max_streams);
     if (s->in_streams == NULL) {
         ngx_rtmp_close_connection(c);
         return NULL;
     }
 
+#if (nginx_version >= 1007005)
+    ngx_queue_init(&s->posted_dry_events);
+#endif
+
     s->epoch = ngx_current_msec;
     s->timeout = cscf->timeout;
+    s->buflen = cscf->buflen;
     ngx_rtmp_set_chunk_size(s, NGX_RTMP_DEFAULT_CHUNK_SIZE);
 
 
